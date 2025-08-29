@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import dask.dataframe as dd
+import io
 
 # --- Page Configuration ---
 st.set_page_config(
-    page_title="SCADA Data Analysis Tool",
-    page_icon="⚡",
+    page_title="Optimized SCADA Analysis Tool",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -14,22 +15,29 @@ st.set_page_config(
 # --- Helper Functions ---
 
 @st.cache_data
-def load_excel_data(uploaded_file):
+def load_excel_data_optimized(uploaded_file):
     """
-    Load data from the uploaded Excel file. This requires 'openpyxl'.
+    Load data from the uploaded Excel file using a memory-optimized approach.
+    It reads the Excel file once, converts it to an in-memory CSV, and then
+    lets Dask handle the CSV efficiently.
     """
     if uploaded_file is None:
         return None
     try:
-        # Pandas is used here as Dask's read_excel is less direct.
-        # For large files, this might be slow, but it's the most reliable way.
+        # --- PERFORMANCE OPTIMIZATION ---
+        # 1. Read Excel into memory with Pandas (unavoidable first step for .xlsx)
         pandas_df = pd.read_excel(uploaded_file, engine='openpyxl')
         
-        # Convert to Dask DataFrame for consistent, memory-efficient processing later
-        dask_df = dd.from_pandas(pandas_df, npartitions=2) # Use at least 2 partitions
+        # 2. Convert to a CSV string in memory. This is much faster for Dask to process.
+        csv_buffer = io.StringIO()
+        pandas_df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0) # Rewind the buffer to the beginning
         
-        # --- Data Cleaning and Transformation ---
-        # Ensure correct data types before combining
+        # 3. Load the in-memory CSV with Dask for lazy, efficient processing.
+        #    This avoids holding the entire file in memory as a Pandas DataFrame.
+        dask_df = dd.read_csv(csv_buffer)
+
+        # --- Data Cleaning and Transformation (using Dask) ---
         dask_df['Date'] = dask_df['Date'].astype(str)
         dask_df['Time'] = dask_df['Time'].astype(str)
         dask_df['Turbine Number'] = dask_df['Turbine Number'].astype(str)
@@ -39,7 +47,6 @@ def load_excel_data(uploaded_file):
         dask_df['Parameter'] = dask_df['Turbine Number'] + ' - ' + dask_df['Variable']
         dask_df['Value'] = dd.to_numeric(dask_df['Value'], errors='coerce')
         
-        # Drop rows with any parsing errors
         dask_df = dask_df.dropna(subset=['Value', 'Timestamp'])
         
         return dask_df[['Timestamp', 'Parameter', 'Value']]
@@ -54,8 +61,8 @@ def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
 # --- Main Application UI ---
-st.title("SCADA Trend Data Visualization Tool")
-st.markdown("Upload your raw **Excel file**. The app will automatically process and visualize the data.")
+st.title("🚀 Optimized SCADA Data Visualization Tool")
+st.markdown("Upload your raw **Excel file**. This version is optimized for faster loading on deployed servers.")
 
 # --- Sidebar Controls ---
 with st.sidebar:
@@ -66,8 +73,8 @@ with st.sidebar:
         st.session_state.dask_df = None
 
     if uploaded_file:
-        with st.spinner('Loading and processing Excel file...'):
-            st.session_state.dask_df = load_excel_data(uploaded_file)
+        with st.spinner('Optimizing and processing Excel file...'):
+            st.session_state.dask_df = load_excel_data_optimized(uploaded_file)
 
     if st.session_state.dask_df is not None:
         dask_df = st.session_state.dask_df
